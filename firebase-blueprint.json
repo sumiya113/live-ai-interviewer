@@ -1,0 +1,39 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User account information and profile schema",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The unique user identifier matching their firebase auth uid"
+        },
+        "email": {
+          "type": "string",
+          "description": "The user's primary email address"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "The user's display name"
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "The user's profile photo"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "User registration timestamp"
+        }
+      },
+      "required": ["userId", "email", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User specific accounts"
+    }
+  }
+}

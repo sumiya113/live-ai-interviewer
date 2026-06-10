@@ -1,0 +1,11 @@
+{
+  "name": "Live AI Interviewer",
+  "description": "A live AI-powered interview application that provides a realistic interview experience with role-specific questions, real-time interaction via video and audio, and detailed post-interview feedback.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

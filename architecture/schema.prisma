@@ -1,0 +1,327 @@
+// /////////////////////////////////////////////////////////////////////////////
+// Live AI Interviewer Pro - Production PostgreSQL Schema
+// ORM: Prisma
+// Features: Multi-tenant, Subscriptions, AI Scores, Resume & Video Analytics, Audit Logging
+// /////////////////////////////////////////////////////////////////////////////
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum PlanType {
+  FREE
+  PRO
+  TEAM
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  UNPAID
+}
+
+enum SessionStatus {
+  PENDING
+  CONNECTED
+  COMPLETED
+  FAILED
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  INTERVIEWER
+  CANDIDATE
+}
+
+enum QuestionType {
+  TECHNICAL
+  BEHAVIORAL
+  COMMUNICATION
+  PROBLEM_SOLVING
+  CULTURAL_FIT
+}
+
+// ==========================================
+// 1. Authentication & Multi-Tenancy
+// ==========================================
+
+model User {
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clerkId       String         @unique
+  email         String         @unique
+  firstName     String?
+  lastName      String?
+  avatarUrl     String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  deletedAt     DateTime?      // Soft delete timestamp
+
+  // Relations
+  memberships   Membership[]
+  resumes       Resume[]
+  interviews    Interview[]
+  auditLogs     AuditLog[]
+  coachingPlans CoachingPlan[]
+
+  @@index([clerkId])
+  @@index([email])
+}
+
+model Organization {
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name         String
+  slug         String        @unique
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  deletedAt    DateTime?
+
+  // Relations
+  memberships  Membership[]
+  interviews   Interview[]
+  subscription Subscription?
+
+  @@index([slug])
+}
+
+model Membership {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  role           MemberRole   @default(CANDIDATE)
+  userId         String       @db.Uuid
+  organizationId String       @db.Uuid
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+}
+
+// ==========================================
+// 2. Billing & Subscription Management
+// ==========================================
+
+model Subscription {
+  id                   String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId       String             @unique @db.Uuid
+  stripeCustomerId     String             @unique
+  stripeSubscriptionId String?            @unique
+  stripePriceId        String?
+  plan                 PlanType           @default(FREE)
+  status               SubscriptionStatus @default(ACTIVE)
+  currentPeriodStart   DateTime           @default(now())
+  currentPeriodEnd     DateTime
+  cancelAtPeriodEnd    Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  organization         Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([stripeCustomerId])
+  @@index([stripeSubscriptionId])
+}
+
+model Payment {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  subscriptionId String    @db.Uuid
+  amount         Int       // Amount in cents
+  currency       String    @default("usd")
+  receiptUrl     String?
+  stripePaymentId String   @unique
+  createdAt      DateTime  @default(now())
+
+  @@index([stripePaymentId])
+}
+
+// ==========================================
+// 3. Resumes, JDs & Parsing Analysis
+// ==========================================
+
+model Resume {
+  id                String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String       @db.Uuid
+  fileUrl           String
+  fileName          String
+  parsedText        String?      @db.Text
+  parsedSkills      String[]     // Postgres array mapping
+  parsedExperience  Json?        // Structured resume info
+  parsedEducation   Json?
+  resumeScore       Int?         // Pre-calculated fit score
+  createdAt         DateTime     @default(now())
+
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  interviews        Interview[]
+
+  @@index([userId])
+}
+
+model JobDescription {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title           String
+  rawText         String       @db.Text
+  requiredSkills  String[]
+  preferredSkills String[]
+  experienceYears Int?
+  createdAt       DateTime     @default(now())
+
+  interviews      Interview[]
+}
+
+// ==========================================
+// 4. Interviews & Multi-Modal Streaming Session
+// ==========================================
+
+model Interview {
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String          @db.Uuid
+  organizationId   String?         @db.Uuid
+  resumeId         String?         @db.Uuid
+  jobDescriptionId String?         @db.Uuid
+  status           SessionStatus   @default(PENDING)
+  title            String
+  difficulty       String          @default("Intermediate")
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  deletedAt        DateTime?
+
+  // Relations
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization     Organization?   @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  resume           Resume?         @relation(fields: [resumeId], references: [id], onDelete: SetNull)
+  jobDescription   JobDescription? @relation(fields: [jobDescriptionId], references: [id], onDelete: SetNull)
+  questions        InterviewQuestion[]
+  videoAnalytics   VideoAnalytics[]
+  report           FeedbackReport?
+
+  @@index([userId])
+  @@index([organizationId])
+}
+
+model InterviewQuestion {
+  id           String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  interviewId  String            @db.Uuid
+  text         String            @db.Text
+  type         QuestionType      @default(TECHNICAL)
+  idealAnswer  String?           @db.Text
+  createdAt    DateTime          @default(now())
+
+  interview    Interview         @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  response     InterviewResponse?
+
+  @@index([interviewId])
+}
+
+model InterviewResponse {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  questionId        String            @unique @db.Uuid
+  transcriptText    String            @db.Text
+  audioDurationMs   Int?
+  audioS3Url        String?
+  technicalScore    Int?
+  communicationScore Int?
+  clarityScore      Int?
+  problemSolvingScore Int?
+  isHelpfulFeedback String?           @db.Text
+  createdAt         DateTime          @default(now())
+
+  question          InterviewQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId])
+}
+
+// ==========================================
+// 5. Video Intelligence & Behavioral Analysis
+// ==========================================
+
+model VideoAnalytics {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  interviewId     String    @db.Uuid
+  timestampMs     Int       // Time offset in interview
+  eyeContactScore Int       // Percentage of compliance
+  attentionLevel  String    // HIGH, MEDIUM, LOW
+  smileFrequency  Float     // Hz/intensity
+  postureScore    Int       // Alignment score
+  createdAt       DateTime  @default(now())
+
+  interview       Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+
+  @@index([interviewId])
+}
+
+// ==========================================
+// 6. Comprehensive Post-Interview Feedback & Report
+// ==========================================
+
+model FeedbackReport {
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  interviewId      String         @unique @db.Uuid
+  overallScore     Int
+  technicalScore   Int
+  communicationScore Int
+  confidenceScore  Int
+  problemSolving    Int
+  leadership       Int
+  culturalFit      Int
+  strengths        String[]
+  weaknesses       String[]
+  opportunities    String[]
+  coachingPlanId   String?        @db.Uuid
+  createdAt        DateTime       @default(now())
+
+  interview        Interview      @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  coachingPlan     CoachingPlan?  @relation(fields: [coachingPlanId], references: [id], onDelete: SetNull)
+}
+
+model CoachingPlan {
+  id               String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String           @db.Uuid
+  weeklyGoal       String           @db.Text
+  dailyExercises   String[]
+  recommendedReads String[]
+  createdAt        DateTime         @default(now())
+
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  feedbackReports  FeedbackReport[]
+
+  @@index([userId])
+}
+
+// ==========================================
+// 7. Security, Logs & Feature Flags
+// ==========================================
+
+model AuditLog {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String?  @db.Uuid
+  action     String   // e.g. "USER_LOGIN", "INTERVIEW_START", "EXPORT_REPORT"
+  ipAddress  String?
+  userAgent  String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+}
+
+model FeatureFlag {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key         String   @unique
+  description String?
+  isActive    Boolean  @default(false)
+  rules       Json?    // Targeting rules for users/orgs
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([key])
+}
