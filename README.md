@@ -1,4 +1,4 @@
-# Live AI Interviewer
+# OnTheFly - AI-Powered Live Interview Practice Application
 
 [![React](https://img.shields.io/badge/React-19.1.1-61DAFB?logo=react)](https://react.dev)
 [![Vite](https://img.shields.io/badge/Vite-6.2.0-646CFF?logo=vite)](https://vitejs.dev)
